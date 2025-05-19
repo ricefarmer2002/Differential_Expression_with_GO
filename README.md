@@ -3,6 +3,14 @@
 #### Overview
 This repository contains the code and analysis for transcriptomic analysis, specifically differential expression analysis, performed on RNA-seq data from mutant and control samples. The focus of this study is a single-nucleotide polymorphism (SNP) in the transcription factor, forkhead protein (FKHR) mRNA, suspected to cause a genetic disease by altering gene expression.
 
+![image](https://github.com/user-attachments/assets/d7f41a58-7ebf-4e40-9413-03b10ec340df)
+Figure 1. Integrative Genomics Viewer (IGV) visualising SNPs identified in the forkhead protein (FKHR) mRNA transcription factor coding sequence.
+
+Mutation	Codon Change	Amino Acid (AA) Change	AA Property Change	Quality Score	Depth	Alternative Observations
+C1103G	CCCCGC	Proline Arginine	Non-polar Positively Charged	101150	6809	6672
+T1142C	TTCCTC	Phenylalanine Leucine	Aromatic  Aliphatic (hydrophobic)	107039	7130	7002
+T1878A	TTCATC	Phenylalanine  Isoleucine	Aromatic  Aliphatic (hydrophobic)	106998	7214	7061
+
 #### Key Findings
 The most significant SNP (C1103G) leads to a Proline-to-Arginine amino acid change in FKHR.
 
