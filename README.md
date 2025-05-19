@@ -19,10 +19,9 @@ Upregulation of mitotic processes, chromosome segregation, and mRNA processing.
 Downregulation of ion homeostasis and autophagy pathways.
 
 #### Repository Structure
-bash
-Copy
-Edit
-├── DE_PIPELINE_UPLOAD_RDY.qmd
+
+├── DE_PIPELINE_UPLOAD_RDY.qmd # The differential analysis pipeline
+
 └── README.md             # This file
 
 ##### Prerequisites
