@@ -1,0 +1,616 @@
+---
+title: "genetics_exam"
+format: html
+editor: visual
+---
+
+**GAI Declaration**
+
+I did use generative AI in the production of this report, specifically, I used ChatGPT 3.5 for the interpretation of error messages and to aid understanding for deeper annotation of code.
+
+### Variant calling
+
+Ubuntu
+
+## Transcriptomic Analysis Pipeline
+
+Load Libraries and Data
+
+```{r}
+library(DESeq2)
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+
+# Loading counts and sample info (metadata)
+counts_data <- read.csv("counts_data.csv", row.names = 1)
+sample_info <- read.csv("sample_info.csv", row.names = 1)
+
+# Ensuring the correct order and make sure evrything matches
+all(colnames(counts_data) == rownames(sample_info))
+
+```
+
+Creating DESeq dataset and filtering low counts
+
+```{r}
+# This creates the DESeq2 dataset using the counts data and samples info, with the mutation as the factor in the experimental design
+dds <- DESeqDataSetFromMatrix(countData = counts_data,
+                              colData = sample_info,
+                              design = ~ mutation)
+
+# Filtering genes with low expression to prevent distortion
+dds <- dds[rowSums(counts(dds)) >= 10,]
+
+# Relevel the factor mutation so that the control is used as reference
+dds$mutation <- relevel(dds$mutation, ref = "ctl")
+```
+
+Running DESeq2
+
+```{r}
+# Perform DESeq2 differential eexpression analaysis
+dds <- DESeq(dds)
+# Extracting the results
+res <- results(dds)
+# Sorting the results by the adjusted p-value
+res <- res[order(res$padj), ]
+# Displaying the results
+summary(res)
+
+```
+
+Visualise Results
+
+```{r}
+# MA plot
+plotMA(res, ylim = c(-5, 5))
+
+```
+
+Volcano plot using enhanced volcano package
+
+```{r}
+# check if its installed first
+if (!require("EnhancedVolcano")) {
+    install.packages("BiocManager")
+    BiocManager::install("EnhancedVolcano")
+}
+library(EnhancedVolcano)
+
+```
+
+```{r}
+# Create volcano plot highlighting the significant DEGs
+EnhancedVolcano(res,
+    lab = rownames(res), # gene names as labels
+    x = 'log2FoldChange', # x-axis label
+    y = 'padj', # y-axis label
+    xlim = c(-5, 5), # set x-axis range 
+    title = 'Differential Expression: Mutant vs Control',
+    pCutoff = 0.01, # threshold
+    FCcutoff = 1.5, # threshold
+    pointSize = 3.0, 
+    labSize = 3.5,
+    col = c('grey30', 'forestgreen', 'royalblue', 'red2'), # setting colours for points
+    legendLabels = c('NS', 'Log2FC', 'Adj p-val', 'Adj p-val & Log2FC'), # legend
+    legendPosition = 'right',
+    legendLabSize = 12,
+    legendIconSize = 4.0,
+    drawConnectors = TRUE,
+    widthConnectors = 0.5)
+
+```
+
+Exporting Volcano
+
+```{r}
+# Using ggsave to export
+ggsave("volcano_plot.png", width = 10, height = 8, dpi = 300)
+
+```
+
+PCA Plot
+
+```{r}
+# Normal PCA package
+
+# Rlog tranformation for better visualisation
+rld <- rlogTransformation(dds)
+# specify the grouping variable
+plotPCA(rld, intgroup = "mutation")
+
+```
+
+Enhanced PCA plot
+
+```{r}
+# Using ggplot for better visualisation
+library(ggplot2)
+# Re rlog tranform
+rld <- rlogTransformation(dds)
+# Creating PCA data 
+pcaData <- plotPCA(rld, intgroup = "mutation", returnData = TRUE)
+# Calculating variance for axis labels
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+# Plotting with ggplot
+ggplot(pcaData, aes(PC1, PC2, color = mutation, label = name)) +
+  geom_point(size = 5) +
+  geom_text(vjust = 1.5, hjust = 1.2, size = 4) +
+  labs(title = "PCA: Mutant vs Control",
+       # Making sure the variance is labels on PC1/2
+       x = paste0("PC1: ", percentVar[1], "% variance"),
+       y = paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") # Colour scheme
+
+```
+
+Saving pca
+
+```{r}
+ggsave("PCA_plot.png", width = 8, height = 6, dpi = 300)
+
+```
+
+Heatmap for sample distance
+
+```{r}
+# Calculating euclidean distances between samples 
+sampleDists <- dist(t(assay(rld)))
+
+# Visualising the distance matrix with a heatmap to show similarity/differences between conditions
+pheatmap(as.matrix(sampleDists), clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         main = "Sample Distance Matrix")
+
+```
+
+Renaming columns and condition annotation
+
+```{r}
+# Extracting the condition info
+sample_conditions <- as.data.frame(colData(dds)[, "mutation", drop = FALSE])
+
+# Setting rownames as coloumn names from matrix to ensure proper mapping
+rownames(sample_conditions) <- colnames(assay(rld))
+colnames(sample_conditions) <- "Condition"
+
+# Defining custom colors for conditions to ensure same colour scheme
+ann_colors <- list(Condition = c(ctl = "skyblue", mut = "tomato"))
+
+# Renaming the columns to just ctl or mut for clarity
+colnames(rld) <- paste0(sample_conditions$Condition, "_", seq_len(ncol(rld)))
+
+```
+
+Plot with annotations
+
+```{r}
+# Replotting the sample distance heatmap with mutation annotations
+sampleDists <- dist(t(assay(rld)))
+pheatmap(as.matrix(sampleDists),
+         annotation_col = sample_conditions,
+         annotation_colors = ann_colors,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_colnames = TRUE,
+         main = "Sample Distance Matrix by Condition")
+
+```
+
+Significant gene stats
+
+```{r}
+# Filter DEGs for signifcance (padj<0.01)
+res_sig <- subset(res, padj < 0.01)
+
+# Calculating upregulated vs downregulated DEGs
+up <- sum(res_sig$log2FoldChange > 0, na.rm = TRUE)
+down <- sum(res_sig$log2FoldChange < 0, na.rm = TRUE)
+
+# Printing up/down regulated numbers
+cat("Upregulated genes:", up, "\n")
+cat("Downregulated genes:", down, "\n")
+
+# Looking at the top examples
+head(res_sig[order(res_sig$log2FoldChange, decreasing = TRUE), ])  # Up
+head(res_sig[order(res_sig$log2FoldChange, decreasing = FALSE), ]) # Down
+
+```
+
+Histogram of adjusted p-values and log2FC
+
+```{r}
+# Histogram of pvalues to check distribution
+hist(res$padj, breaks=50, col="grey", main="Adjusted p-values")
+# Histogram of log2 fold change to check distribution
+hist(res$log2FoldChange, breaks=50, col="lightblue", main="Log2 Fold Changes")
+
+```
+
+plotCounts for individual genes
+
+```{r}
+# Example for most significant DEG
+plotCounts(dds, gene=rownames(res)[which.min(res$padj)], intgroup="mutation")
+
+# Plotting specific gene - for comparison 
+plotCounts(dds, gene="ENSG00000000419", intgroup="mutation")
+
+
+
+```
+
+Describing the data
+
+```{r}
+mcols(res)$description
+
+```
+
+Exporting the results
+
+```{r}
+# Saving the results to a text file by first merging the dataframes
+resdata <- merge(as.data.frame(res), 
+                 as.data.frame(counts(dds, normalized=TRUE)), 
+                 by="row.names", sort=FALSE)
+names(resdata)[1] <- "Gene"
+
+# Writing the results as a tab seperated file
+write.table(resdata, file="diffexpr-results.txt", sep="\t", quote=F)
+
+```
+
+### Pathway enrichment analysis
+
+This section was unused as it was enriching all differentially expressed genes meaning there was no clear implications of upregulation/downfregulation
+
+```{r}
+# Loading packages for GO analysis
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+# Preparing gene list for analysis and cleaning them
+resdata$Gene <- sapply(strsplit(resdata$Gene, "\\."), `[`, 1) 
+
+# Preparing the results and normalised count data
+res_df <- as.data.frame(res)
+norm_counts <- as.data.frame(counts(dds, normalized = TRUE))
+
+# Avoiding names of conflict before merge
+res_df$Gene <- rownames(res_df)
+norm_counts$Gene <- rownames(norm_counts)
+
+# Merging by Gene
+resdata <- inner_join(res_df, norm_counts, by = "Gene")
+
+
+# filtering for significance
+sigGenes <- resdata %>%
+  filter(padj < 0.01 & !is.na(Gene)) %>%
+  pull(Gene)
+# Defining the background for the enrichment analysis
+universe <- resdata %>% pull(Gene)
+
+# Running GO enrichment analysis
+enrich_go <- enrichGO(
+  gene = sigGenes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENSEMBL",
+  ont = "BP",
+  universe = universe,
+  qvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+# Visualising the results
+dotplot(enrich_go, showCategory = 15)
+
+```
+
+Eporting GO Dotplot
+
+```{r}
+# Saving the dotplot to file
+png("GO_dotplot.png", width = 1000, height = 800)
+dotplot(enrich_go, showCategory = 15, title = "GO Enrichment (Biological Process)")
+dev.off()
+
+```
+
+Save DEG list
+
+```{r}
+# Saving DEGs as CSV
+write.csv(res_sig, file = "significant_DEGs.csv", row.names = TRUE)
+
+```
+
+Summary
+
+```{r}
+# Printing all the stats again for the report
+cat("Total significant genes (padj < 0.01):", nrow(res_sig), "\n")
+cat("Top upregulated gene:", rownames(res_sig[which.max(res_sig$log2FoldChange), ]), "\n")
+cat("Top downregulated gene:", rownames(res_sig[which.min(res_sig$log2FoldChange), ]), "\n")
+
+```
+
+Barplot of enriched terms
+
+```{r}
+barplot(enrich_go, showCategory = 15, title = "Top GO Terms", font.size = 12)
+
+```
+
+Enrichment table
+
+```{r}
+# printing table for enrichment results
+enrich_table <- as.data.frame(enrich_go)
+head(enrich_table[, c("ID", "Description", "GeneRatio", "p.adjust")])
+
+```
+
+Clustered Heatmap of top DEGs
+
+Prepare data
+
+```{r}
+# Selecting the top 50 DEGs by adjusted p-value
+top_genes <- head(rownames(res_sig), 50)
+
+# Extracting the normalised expression values from rlog
+rld_mat <- assay(rld)[top_genes, ]
+
+# Optional: scale data (gene-wise z-score)
+rld_scaled <- t(scale(t(rld_mat)))
+
+```
+
+Adding annotation labels
+
+```{r}
+# Make annotation data frame for column names to define conditions
+annotation_col <- as.data.frame(colData(dds)[, "mutation", drop = FALSE])
+rownames(annotation_col) <- colnames(rld_scaled)
+
+# Setting the same colours for consistency
+ann_colors <- list(mutation = c(ctl = "skyblue", mut = "tomato"))
+
+```
+
+Plotting heatmap
+
+```{r}
+# loading heatmap library
+library(pheatmap)
+
+# Plotting the heatmap for top 50 DEGs
+pheatmap(rld_scaled,
+         annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         cluster_rows = TRUE, # clustered rows and columns
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         show_colnames = TRUE,
+         fontsize_col = 10,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(100), # defining colour pallete
+         main = "Top 50 Differentially Expressed Genes")
+
+```
+
+Plotting all DEGs in heatmap
+
+```{r}
+# Using all significantly DE genes (padj < 0.01) for clearer visualisation
+all_degs <- rownames(res_sig)
+
+# creating DF for heatmap data, making sure to transpose and scale
+rld_mat <- assay(rld)[all_degs, ]
+rld_scaled <- t(scale(t(rld_mat)))
+
+# Plotting the heatmap
+pheatmap(rld_scaled,
+         annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         fontsize_col = 10,
+         main = "Heatmap of All Significant DEGs")
+
+```
+
+### Splitting Enrichment analysis by conditions
+
+Split DEGs so that we can visualise what pathways are upregulated and which are downregulated
+
+```{r}
+# Upregulated in mutant compared to control (log2FC > 0)
+up_genes <- resdata %>%
+  filter(padj < 0.01 & log2FoldChange > 0) %>%
+  pull(Gene)
+
+# Downregulated in mutant compared to control (log2FC < 0)
+down_genes <- resdata %>%
+  filter(padj < 0.01 & log2FoldChange < 0) %>%
+  pull(Gene)
+
+```
+
+Run enrichment seperately
+
+```{r}
+# Enrichment for upregulated DEGs only
+enrich_up <- enrichGO(
+  gene = up_genes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENSEMBL",
+  ont = "BP",
+  universe = universe,
+  qvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+# Enrichment for downregulated DEGs only
+enrich_down <- enrichGO(
+  gene = down_genes,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENSEMBL",
+  ont = "BP",
+  universe = universe,
+  qvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+```
+
+Visualise separately
+
+```{r}
+# Savinng the upregulated pathways
+png("GO_dotplot_upregulated.png", width = 1000, height = 800)
+dotplot(enrich_up, showCategory = 15, title = "GO: Upregulated in Mutant")
+dev.off()
+
+# Saving the downregulated pathways
+png("GO_dotplot_downregulated.png", width = 1000, height = 800)
+dotplot(enrich_down, showCategory = 15, title = "GO: Downregulated in Mutant")
+dev.off()
+
+```
+
+Comparative GO barplot by condition
+
+Convert results to GO dataframe
+
+```{r}
+# creating dfs for up/down
+df_up <- as.data.frame(enrich_up)
+df_down <- as.data.frame(enrich_down)
+
+# Adding conditional labels
+df_up$condition <- "Up in Mutant"
+df_down$condition <- "Up in Control"
+
+# Combining and selecting top 10 from up and down
+combined_go <- bind_rows(
+  head(df_up, 10),
+  head(df_down, 10)
+)
+
+```
+
+Plot side by side comparison
+
+```{r}
+# Reloading ggplot
+library(ggplot2)
+
+# Reverse ordering for better label alignment
+combined_go$Description <- factor(combined_go$Description,
+                                  levels = rev(unique(combined_go$Description)))
+
+# Plotting the side by side barplot for up/down pathways
+ggplot(combined_go, aes(x = Description, y = -log10(p.adjust), fill = condition)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  coord_flip() + # flipping fpr horizontal bars for clearer labels/readibility
+  labs(title = "Comparative GO Enrichment",
+       x = "GO Term",
+       y = "-log10(adjusted p-value)") +
+  scale_fill_manual(values = c("Up in Mutant" = "tomato", "Up in Control" = "skyblue")) +
+  theme_minimal()
+
+```
+
+Saving the plot
+
+```{r}
+ggsave("comparative_go_barplot.png", width = 12, height = 8, dpi = 300)
+
+
+```
+
+# Translating reference for interpro
+
+This will allow for the functional domain analysis of the protein to understand if the variant is in a functional domain
+
+```{r}
+# Checking if we need to install Bioconductor/Biostrings
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biostrings")
+
+# Load Biostrings library
+library(Biostrings)
+
+
+```
+
+```{r}
+
+# Loading the reference sequence
+ref_seq <- readDNAStringSet("reference.fasta")
+
+# Checking the sequence
+ref_seq
+
+# Translating the sequence in frame 1 as it starts with atg
+protein_seq <- translate(ref_seq[[1]])
+
+# Viewing the translated protein sequence
+protein_seq
+
+# Converting to an XStringSet object to save
+protein_seq_set <- AAStringSet(protein_seq)
+
+# Saving the protein sequence
+writeXStringSet(protein_seq_set, "reference_protein.fasta")
+ 
+```
+
+Creating a table of top upregulated/downregulated genes and linking them to pathways for results section
+
+```{r}
+# Load packages
+library(dplyr)
+library(tidyr)
+library(DT)  # Interactive HTML tables - optional if want to save as a html
+
+# Select the top 5 upregulated and downregulated genes for the table
+top_up <- head(rownames(res_sig[order(res_sig$log2FoldChange, decreasing = TRUE), ]), 5)
+top_down <- head(rownames(res_sig[order(res_sig$log2FoldChange, decreasing = FALSE), ]), 5)
+
+# Combining the top genes and relevant info
+top_genes <- c(top_up, top_down)
+top_gene_info <- data.frame(
+  Gene = top_genes,
+  Log2FC = res_sig[top_genes, "log2FoldChange"],
+  Regulation = ifelse(res_sig[top_genes, "log2FoldChange"] > 0, "Upregulated", "Downregulated")
+)
+
+# Displaying the plot in rstudio for clarity as an interactive html
+datatable(
+  top_gene_info,
+  caption = "Top 5 Upregulated and Downregulated Genes",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+) %>% 
+  formatStyle(
+    'Regulation',
+    target = 'row',
+    backgroundColor = styleEqual(
+      c("Upregulated", "Downregulated"),
+      c('#FFCCCC', '#CCCCFF')  # Red for upregulated, blue for downregulated using lighter colours for readability
+    ),
+    color = styleEqual(
+      c("Upregulated", "Downregulated"),
+      c('red', 'blue')  # Text color matching background using darker colours for readability
+    )
+  )
+
+```
